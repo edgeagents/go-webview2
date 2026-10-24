@@ -72,10 +72,11 @@ type Chromium struct {
 	webview2RuntimeVersion string
 
 	// Settings
-	Debug                 bool
-	DataPath              string
-	BrowserPath           string
-	AdditionalBrowserArgs []string
+	Debug                       bool
+	DataPath                    string
+	BrowserPath                 string
+	AdditionalBrowserArgs       []string
+	CustomCrashReportingEnabled bool
 
 	// permissions
 	permissions      map[CoreWebView2PermissionKind]CoreWebView2PermissionState
@@ -182,14 +183,16 @@ func (e *Chromium) Embed(hwnd uintptr) bool {
 		}
 	}
 
-	browserArgs := strings.Join(e.AdditionalBrowserArgs, " ")
-	if err := createCoreWebView2EnvironmentWithOptions(e.BrowserPath, dataPath, e.envCompleted, browserArgs); err != nil {
-		e.errorCallback(fmt.Errorf("error calling Webview2Loader: %s", err.Error()))
-	}
-
 	e.webview2RuntimeVersion, err = webviewloader.GetAvailableCoreWebView2BrowserVersionString(e.BrowserPath)
 	if err != nil {
-		e.errorCallback(fmt.Errorf("error getting Webview2 runtime version: %s", err.Error()))
+		e.errorCallback(err)
+	}
+	if e.CustomCrashReportingEnabled && !HasCapability(e.webview2RuntimeVersion, CustomCrashReporting) {
+		e.errorCallback(fmt.Errorf("custom crash reporting: %w", UnsupportedCapabilityError))
+	}
+	browserArgs := strings.Join(e.AdditionalBrowserArgs, " ")
+	if err := createCoreWebView2EnvironmentWithOptions(e.BrowserPath, dataPath, e.envCompleted, browserArgs, e.CustomCrashReportingEnabled); err != nil {
+		e.errorCallback(fmt.Errorf("error calling Webview2Loader: %s", err.Error()))
 	}
 
 	var msg w32.Msg
@@ -641,7 +644,12 @@ func (e *Chromium) PutIsGeneralAutofillEnabled(value bool) error {
 	if err != nil {
 		return err
 	}
-	webview2Settings4 := webview2Settings.GetICoreWebView2Settings4()
+	defer webview2Settings.Release()
+	webview2Settings4, err := webview2Settings.GetICoreWebView2Settings4()
+	if err != nil {
+		return err
+	}
+	defer webview2Settings4.Vtbl.Release.Call(uintptr(unsafe.Pointer(webview2Settings4)))
 	return webview2Settings4.PutIsGeneralAutofillEnabled(value)
 }
 
@@ -656,7 +664,12 @@ func (e *Chromium) PutIsPasswordAutosaveEnabled(value bool) error {
 	if err != nil {
 		return err
 	}
-	webview2Settings4 := webview2Settings.GetICoreWebView2Settings4()
+	defer webview2Settings.Release()
+	webview2Settings4, err := webview2Settings.GetICoreWebView2Settings4()
+	if err != nil {
+		return err
+	}
+	defer webview2Settings4.Vtbl.Release.Call(uintptr(unsafe.Pointer(webview2Settings4)))
 	return webview2Settings4.PutIsPasswordAutosaveEnabled(value)
 }
 
